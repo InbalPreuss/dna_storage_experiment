@@ -40,6 +40,12 @@ if __name__ == '__main__':
                                           k_mer_representative_to_z=config['k_mer_representative_to_z'],
                                           payload_pos=config['payload_pos'],
                                           sampling_rate_from_good_reads_graph=config['sampling_rate_from_good_reads_graph'],
-                                          output_line_graphs_folder=config['output_line_graphs_folder']
+                                          output_line_graphs_folder=config['output_line_graphs_folder'],
+                                          t_list=config['t_list'],
+                                          n_list=config['n_list'],
+                                          cycles_list=config['cycles_list'],
+                                          bc_list=config['bc_list'],
+                                          output_csv_coupon_collector_folder=config['output_csv_coupon_collector_folder'],
+                                          output_hist_coupon_collector_folder=config['output_hist_coupon_collector_folder']
                                           )
     analyze_fastq_data.run()

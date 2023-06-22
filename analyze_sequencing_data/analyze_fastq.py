@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt, patches
 from pandas import DataFrame
 from pandas.io.parsers import TextFileReader
 from tqdm import tqdm
+import csv
 
 import utilities.utilities as utilities
 
@@ -65,7 +66,13 @@ class AnalyzeFastqData:
                  k_mer_representative_to_z: Dict,
                  payload_pos: List,
                  sampling_rate_from_good_reads_graph: Union[Path, str],
-                 output_line_graphs_folder: Union[Path, str]
+                 output_line_graphs_folder: Union[Path, str],
+                 t_list: List,
+                 n_list: List,
+                 cycles_list: List[List],
+                 bc_list: List,
+                 output_csv_coupon_collector_folder: Union[Path, str],
+                 output_hist_coupon_collector_folder: Union[Path, str]
                  ):
         self.input_file = input_file
         self.const_design_file = const_design_file
@@ -99,6 +106,12 @@ class AnalyzeFastqData:
         self.payload_pos = payload_pos
         self.sampling_rate_from_good_reads_graph = sampling_rate_from_good_reads_graph
         self.output_line_graphs_folder = output_line_graphs_folder
+        self.t_list = t_list
+        self.n_list = n_list
+        self.cycles_list = cycles_list
+        self.bc_list = bc_list
+        self.output_csv_coupon_collector_folder = output_csv_coupon_collector_folder
+        self.output_hist_coupon_collector_folder = output_hist_coupon_collector_folder
 
     # Verify universal
 
@@ -315,6 +328,136 @@ class AnalyzeFastqData:
                              count_all_z_mm]]
                     np.savetxt(f, cols, fmt='%s', delimiter=",")
 
+    def parse_design(self, design_str):
+        # Remove curly braces
+        design_str = design_str[1:-1]
+        # Split into individual entries
+        entries = design_str.split(")  ")
+        design_dict = {}
+        for entry in entries:
+            # Split the key from the values
+            key, values_str = entry.split(": ")
+            # Remove quotation marks from the key
+            key = key.strip("'")
+            # Split the values string into individual values and remove the 'X' prefix
+            values_str = values_str.replace("(", "").replace(")", "").replace("X", "").replace("  ", ",").replace("'",
+                                                                                                                  "").replace(
+                " ", "").split(",")
+            values = {int(number) for number in values_str}
+            # Add the key-value pair to the dictionary
+            design_dict[key] = values
+        return design_dict
+
+    def sample_till_K_unique(self, df: pd.DataFrame, column_idx: List, K: int, t: int):
+        unique_values = {}
+        sample_rows = []
+        sampled_indices = []
+        column = 'c' + str(column_idx)
+        while len([k for k, v in unique_values.items() if v >= t]) < K:
+            sample = df.drop(sampled_indices).sample()
+            sampled_indices.append(sample.index[0])
+            value = sample.iloc[0][column]
+            if value != 0:
+                unique_values[value] = unique_values.get(value, 0) + 1
+            sample_rows.append(sample)
+
+        # Select K unique values that each appeared at least t times
+        selected_values = set([k for k, v in unique_values.items() if v >= t][:K])
+
+        # Create a DataFrame with only the selected values
+        result_df = pd.concat([row for row in sample_rows if row.iloc[0][column] in unique_values])
+
+        return result_df, selected_values, unique_values
+
+    def random_sample_and_compare(self, data_df, design_df, n, K, bc, cycles_list, t):
+        sampling_results = []
+        design_x = design_df.loc[design_df['bc'] == bc, 'design_x'].iloc[0]
+
+        for _ in range(n):
+            sampling_results_per_cycles_option = []
+            for ci in cycles_list:
+                sampled_df, selected_values, unique_values = self.sample_till_K_unique(data_df.loc[data_df['bc'] == bc], ci, K, t)
+                is_design_equal_sampled_data = list(design_x.values())[ci - 1] == selected_values
+                sampling_results_per_cycles_option.append((len(sampled_df), is_design_equal_sampled_data, list(design_x.values())[ci - 1], selected_values, ci, unique_values))
+
+            total_samples = sum(item[0] for item in sampling_results_per_cycles_option)
+            status = all(item[1] for item in sampling_results_per_cycles_option)
+            design = [item[2] for item in sampling_results_per_cycles_option]
+            selected_values = [item[3] for item in sampling_results_per_cycles_option]
+            ci = [item[4] for item in sampling_results_per_cycles_option]
+            unique_values = [item[5] for item in sampling_results_per_cycles_option]
+            sampling_results.append([total_samples, status, design, selected_values, ci, unique_values])
+
+        return sampling_results
+
+    def plot_results(self, results):
+        xs = [r[0] for r in results]
+        ys = [r[1] for r in results]
+        plt.scatter(xs, ys)
+        plt.xlabel('Number of samples')
+        plt.ylabel('Match with design')
+        plt.show()
+
+    def the_coupon_collector_problem_with_t(self):
+        K = self.subset_size
+
+        # read csv data
+        data_df = pd.read_csv(self.results_good_reads_file)
+
+        # convert design file to dataframe
+        design_df = pd.read_csv(self.compare_design_to_experiment_results_output_file)
+        design_df['design_x'] = design_df['design_x'].apply(self.parse_design)
+
+        for bc in self.bc_list:
+            for cycles in list(self.cycles_list):
+                for t in self.t_list:
+                    for n in self.n_list:
+                        # perform the operation
+                        results = self.random_sample_and_compare(data_df, design_df, n=n, K=K, bc=bc,
+                                                                 cycles_list=cycles, t=t)
+
+                        # plot the results
+                        self.hist_of_the_coupon_collector_problem_with_t(results, K, t, n, cycles, bc)
+
+    def hist_of_the_coupon_collector_problem_with_t(self, results, K, t, n, cycles_list, bc):
+        # xs = [r[0] for r in results]
+        xs_results = []
+
+        xs_results.append([[r[0] for r in results if r[1] is True], True])
+        xs_results.append([[r[0] for r in results if r[1] is False], False])
+
+        hist_name_file = 'bc=' + str(bc) \
+                             + '_K=' + str(K) \
+                             + '_t=' + str(t) \
+                             + '_n=' + str(n) \
+                             + '_cycles_list=' + str(cycles_list)
+
+        for xs, status in xs_results:
+            # Plot histogram
+            plt.hist(xs, bins=10, alpha=0.5, label='Number of samples')
+
+            plt.xlabel('# Reads')
+            plt.ylabel('Frequency')
+            plt.legend(loc='upper right')
+            plt.title(hist_name_file+ 'status=' + str(status))
+
+            plt.savefig(self.output_hist_coupon_collector_folder+hist_name_file+ 'status=' + str(status))
+            plt.close()
+            print(hist_name_file+ 'status=' + str(status))
+
+        file_name=self.output_csv_coupon_collector_folder+hist_name_file+'.csv'
+
+        headers = ["Sample", "Status", "Design", "Sample", "Cycle", "Unique values"]
+
+        # Write to CSV
+        with open(file_name, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for csv_row in results:
+                writer.writerow(csv_row)
+
+        print(f'Data written to {file_name}')
+
     def create_heatmap_with_rectangles_on_most_common(self, dict_foreach_bc_and_x_count_all_cycles_matrix: Dict,
                                                       ax) -> None:
 
@@ -505,33 +648,38 @@ class AnalyzeFastqData:
         utilities.is_dir_exists(self.output_graphs_folder)
         utilities.is_dir_exists(self.output_csv_folder)
         utilities.is_dir_exists(self.output_line_graphs_folder)
+        utilities.is_dir_exists(self.output_csv_coupon_collector_folder)
+        utilities.is_dir_exists(self.output_hist_coupon_collector_folder)
 
     def run(self):
-        self.create_folders()
+        # self.create_folders()
+        #
+        # # upload design
+        # const_design_pd, payload_design_pd, barcodes_design_pd = self.upload_design()
+        #
+        # # reads
+        # reads = self.open_fastq()
+        #
+        # # reads len showed in histogram
+        # self.reads_len_hist(reads=reads)
+        #
+        # # good reads with len  220
+        # good_reads = self.retrieve_reads_in_specific_len(reads=reads)
+        #
+        # # Write the good reads with len 220 to results_good_reads.csv
+        # self.reads_results_to_csv(reads=good_reads,
+        #                           const_design=const_design_pd,
+        #                           payload_design=payload_design_pd,
+        #                           barcodes_design=barcodes_design_pd)
+        #
+        # # Find most common for each bc and for every cycle in that bc in results of good reads
+        # self.find_most_common()
+        #
+        # # For each bc count amount of reads sequenced
+        # self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file)
+        #
+        # # Create graph with sampling rate
+        # self.create_sampling_rate_from_good_reads_graph()
 
-        # upload design
-        const_design_pd, payload_design_pd, barcodes_design_pd = self.upload_design()
-
-        # reads
-        reads = self.open_fastq()
-
-        # reads len showed in histogram
-        self.reads_len_hist(reads=reads)
-
-        # good reads with len  220
-        good_reads = self.retrieve_reads_in_specific_len(reads=reads)
-
-        # Write the good reads with len 220 to results_good_reads.csv
-        self.reads_results_to_csv(reads=good_reads,
-                                  const_design=const_design_pd,
-                                  payload_design=payload_design_pd,
-                                  barcodes_design=barcodes_design_pd)
-
-        # Find most common for each bc and for every cycle in that bc in results of good reads
-        self.find_most_common()
-
-        # For each bc count amount of reads sequenced
-        self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file)
-
-        # Create graph with sampling rate
-        self.create_sampling_rate_from_good_reads_graph()
+        # We want to find
+        self.the_coupon_collector_problem_with_t()

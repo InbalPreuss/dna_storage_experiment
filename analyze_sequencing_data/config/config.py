@@ -58,11 +58,13 @@ def build_config():
         'count_reads_for_each_bc_file': "analyze_sequencing_data/output/csv/count_reads_for_each_bc.csv",
         'missing_bcs_file': "analyze_sequencing_data/output/csv/missing_bc.csv",
         'output_csv_folder': "analyze_sequencing_data/output/csv/",
+        'output_csv_coupon_collector_folder': "analyze_sequencing_data/output/csv/coupon_collector/",
         'foreach_bc_payload_count_file': "analyze_sequencing_data/output/csv/foreach_bc_payload_count.csv",
         'compare_design_to_experiment_results_output_file': "analyze_sequencing_data/output/csv/compare_design_to_experiment_results.csv",
         'output_hist_folder': "analyze_sequencing_data/output/graphs/hist/",
         'output_folder': "analyze_sequencing_data/output/",
         'len_reads_hist_output_file': "analyze_sequencing_data/output/graphs/hist/len_reads_hist.png",
+        'hist_coupon_colector_output_file': "analyze_sequencing_data/output/graphs/hist/hist_coupon_colector/",
         'output_graphs_folder': 'analyze_sequencing_data/output/graphs/',
         'output_line_graphs_folder': 'analyze_sequencing_data/output/graphs/line_graphs/',
         'sampling_rate_from_good_reads_graph': 'analyze_sequencing_data/output/graphs/line_graphs/sampling_rate_from_good_reads_graph',
@@ -70,10 +72,17 @@ def build_config():
         'heatmap_foreach_bc_and_x_count_with_most_common_file':
             "analyze_sequencing_data/output/graphs/heatmap/heatmap_foreach_bc_and_x_count_with_most_common.png",
         'hist_per_bc_file': "analyze_sequencing_data/output/graphs/hist/hist_per_bc",
+        'output_hist_coupon_collector_folder': "analyze_sequencing_data/output/graphs/hist/output_hist_coupon_collector_folder/",
         'hist_foreach_bc_read_count_file': "analyze_sequencing_data/output/graphs/hist/hist_foreach_bc_read_count",
         'hist_foreach_read_count_count_bc_file': "analyze_sequencing_data/output/graphs/hist/hist_foreach_read_count_count_bc",
         'hist_foreach_error_count_of_bc_file': "analyze_sequencing_data/output/graphs/hist/hist_foreach_error_count_of_bc",
-        'design_simulation_file': 'analyze_sequencing_data/data/sequence_design_file.dna'
+        'design_simulation_file': 'analyze_sequencing_data/data/sequence_design_file.dna',
+
+        # Params for the coupon collector problem
+        't_list': [1, 2, 3, 4, 5],
+        'n_list': [3, 10, 50, 100, 200, 300],
+        'cycles_list': [[1], [2], [3], [4], [1, 2, 3, 4]],
+        'bc_list': [1, 2]
     }
 
     return config
