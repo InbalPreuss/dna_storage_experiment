@@ -681,37 +681,37 @@ class AnalyzeFastqData:
         utilities.is_dir_exists(self.output_hist_coupon_collector_folder)
 
     def run(self):
-        # self.create_folders()
-        #
-        # # upload design
-        # const_design_pd, payload_design_pd, barcodes_design_pd = self.upload_design()
-        #
-        # # reads
-        # reads = self.open_fastq()
-        #
-        # # reads len showed in histogram
-        # self.reads_len_hist(reads=reads)
-        #
-        # # good reads with len  220
-        # good_reads = self.retrieve_reads_in_specific_len(reads=reads)
-        #
-        # # Write the good reads with len 220 to results_good_reads.csv
-        # self.reads_results_to_csv(reads=good_reads,
-        #                           const_design=const_design_pd,
-        #                           payload_design=payload_design_pd,
-        #                           barcodes_design=barcodes_design_pd)
-        #
-        # # Find most common for each bc and for every cycle in that bc in results of good reads
-        # self.find_most_common()
-        #
-        # # For each bc count amount of reads sequenced
-        # self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file)
-        #
-        # # Create graph with sampling rate
-        # self.create_sampling_rate_from_good_reads_graph()
+        self.create_folders()
 
-        # 
+        # upload design
+        const_design_pd, payload_design_pd, barcodes_design_pd = self.upload_design()
+
+        # reads
+        reads = self.open_fastq()
+
+        # reads len showed in histogram
+        self.reads_len_hist(reads=reads)
+
+        # good reads with len  220
+        good_reads = self.retrieve_reads_in_specific_len(reads=reads)
+
+        # Write the good reads with len 220 to results_good_reads.csv
+        self.reads_results_to_csv(reads=good_reads,
+                                  const_design=const_design_pd,
+                                  payload_design=payload_design_pd,
+                                  barcodes_design=barcodes_design_pd)
+
+        # Find most common for each bc and for every cycle in that bc in results of good reads
+        self.find_most_common()
+
+        # For each bc count amount of reads sequenced
+        self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file)
+
+        # Create graph with sampling rate
+        self.create_sampling_rate_from_good_reads_graph()
+
+        # compare_payloads_of_two_bc
         self.compare_payloads_of_two_bc(bc1=1, bc2=2)
 
-        # # We want to find
-        # self.the_coupon_collector_problem_with_t()
+        # We want to find
+        self.the_coupon_collector_problem_with_t()
