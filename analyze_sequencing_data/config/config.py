@@ -45,6 +45,7 @@ def build_config():
         'barcode_len': 20,
         'subset_size': 5,
         'amount_of_payloads': 16,
+        'amount_of_cycles': ['c1', 'c2', 'c3', 'c4'],
         'k_mer_representative_to_z': k_mer_representative_to_z,
         'z_to_k_mer_representative': z_to_k_mer_representative,
 
@@ -80,7 +81,8 @@ def build_config():
 
         # Params for the coupon collector problem
         't_list': [1, 2, 3, 4, 5],
-        'n_list': [3, 10, 50, 100, 200, 300],
+        # 'n_list': [500, 1000, 1500],
+        'n_list': [1500],
         'cycles_list': [[1], [2], [3], [4], [1, 2, 3, 4]],
         'bc_list': [1, 2]
     }

@@ -46,6 +46,7 @@ if __name__ == '__main__':
                                           cycles_list=config['cycles_list'],
                                           bc_list=config['bc_list'],
                                           output_csv_coupon_collector_folder=config['output_csv_coupon_collector_folder'],
-                                          output_hist_coupon_collector_folder=config['output_hist_coupon_collector_folder']
+                                          output_hist_coupon_collector_folder=config['output_hist_coupon_collector_folder'],
+                                          amount_of_cycles=config['amount_of_cycles']
                                           )
     analyze_fastq_data.run()

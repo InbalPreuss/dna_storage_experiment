@@ -72,7 +72,8 @@ class AnalyzeFastqData:
                  cycles_list: List[List],
                  bc_list: List,
                  output_csv_coupon_collector_folder: Union[Path, str],
-                 output_hist_coupon_collector_folder: Union[Path, str]
+                 output_hist_coupon_collector_folder: Union[Path, str],
+                 amount_of_cycles: List
                  ):
         self.input_file = input_file
         self.const_design_file = const_design_file
@@ -112,6 +113,7 @@ class AnalyzeFastqData:
         self.bc_list = bc_list
         self.output_csv_coupon_collector_folder = output_csv_coupon_collector_folder
         self.output_hist_coupon_collector_folder = output_hist_coupon_collector_folder
+        self.amount_of_cycles = amount_of_cycles
 
     # Verify universal
 
@@ -201,6 +203,31 @@ class AnalyzeFastqData:
         with open(self.results_good_reads_file, "ab") as f:
             np.savetxt(f, res, fmt='%i', delimiter=",")
 
+    def compare_payloads_of_two_bc(self, bc1, bc2):
+        df_foreach_bc_payload_count = pd.read_csv(self.foreach_bc_payload_count_file)
+        for cycle in self.amount_of_cycles:
+            bc1_cycle_i = eval(df_foreach_bc_payload_count[str(bc1)][0])[cycle]
+            bc2_cycle_i = eval(df_foreach_bc_payload_count[str(bc2)][0])[cycle]
+
+            # Normalize values in the dictionaries
+            total1 = sum(bc1_cycle_i.values())
+            bc1_cycle_i = {k: v / total1 for k, v in bc1_cycle_i.items()}
+
+            total2 = sum(bc2_cycle_i.values())
+            bc2_cycle_i = {k: v / total2 for k, v in bc2_cycle_i.items()}
+
+            plt.bar(bc1_cycle_i.keys(), bc1_cycle_i.values(), color='#4169E1')
+            plt.bar(bc2_cycle_i.keys(), bc2_cycle_i.values(), color='gray', alpha=0.7)
+            amount_of_payloads = self.amount_of_payloads + 1
+            plt.xticks(range(amount_of_payloads))
+            plt.xlim(0.5, amount_of_payloads)
+            plt.ylim(0, 0.5)
+            plt.title('bc=[' + str(bc1) +','+ str(bc2)+'], cycle=' + cycle)
+            utilities.is_dir_exists(self.hist_per_bc_file)
+            plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.png')
+            plt.close()
+
+
     def hist_per_bc(self, dict_bc_payload, bc, payload):
         plt.bar(dict_bc_payload.keys(), dict_bc_payload.values())
         amount_of_payloads = self.amount_of_payloads + 1
@@ -220,7 +247,7 @@ class AnalyzeFastqData:
         amount_of_bc = self.amount_of_bc + 1
         for i in range(amount_of_bc):
             dict_bc_i = {}
-            for payload in ['c1', 'c2', 'c3', 'c4']:
+            for payload in self.amount_of_cycles:
                 dict_p = {
                     payload: {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0, 13: 0,
                               14: 0,
@@ -228,7 +255,6 @@ class AnalyzeFastqData:
                 dict_bc_i.update(dict_p)
             dict_bc[i] = dict_bc_i
         df_bc = df.sort_values(["bc", "c1", "c2", "c3", "c4"], ascending=True, key=np.sin)
-        # df_bc = df.sort_values(["bc", "c1", "c2", "c3", "c4"], ascending=True, key=np.argsort)
 
         df_bc.fillna(0)
         for row_idx, row in tqdm(df_bc.iterrows()):
@@ -253,14 +279,14 @@ class AnalyzeFastqData:
         # init dict_bc_most_common_i
         for i in range(amount_of_bc):
             dict_bc_most_common_i = {}
-            for payload in ['c1', 'c2', 'c3', 'c4']:
+            for payload in self.amount_of_cycles:
                 dict_p = {payload: []}
                 dict_bc_most_common_i.update(dict_p)
             dict_bc_most_common[i] = dict_bc_most_common_i
 
         # find the config['subset_size'] most common
         for bc_i in range(1, amount_of_bc):
-            for payload in ['c1', 'c2', 'c3', 'c4']:
+            for payload in self.amount_of_cycles:
                 del dict_bc[bc_i][payload][0]
 
                 most_common = heapq.nlargest(self.subset_size, dict_bc[bc_i][payload],
@@ -280,7 +306,7 @@ class AnalyzeFastqData:
 
         for bc_i in range(1, (self.amount_of_bc + 1)):
             result_payload[bc_i] = []
-            for payload in ['c1', 'c2', 'c3', 'c4']:
+            for payload in self.amount_of_cycles:
                 bc_i_str = str(bc_i)
                 d = ast.literal_eval(dict_most_common[bc_i_str][0])
                 d = d[payload]
@@ -376,9 +402,12 @@ class AnalyzeFastqData:
         for _ in range(n):
             sampling_results_per_cycles_option = []
             for ci in cycles_list:
-                sampled_df, selected_values, unique_values = self.sample_till_K_unique(data_df.loc[data_df['bc'] == bc], ci, K, t)
+                sampled_df, selected_values, unique_values = self.sample_till_K_unique(data_df.loc[data_df['bc'] == bc],
+                                                                                       ci, K, t)
                 is_design_equal_sampled_data = list(design_x.values())[ci - 1] == selected_values
-                sampling_results_per_cycles_option.append((len(sampled_df), is_design_equal_sampled_data, list(design_x.values())[ci - 1], selected_values, ci, unique_values))
+                sampling_results_per_cycles_option.append((len(sampled_df), is_design_equal_sampled_data,
+                                                           list(design_x.values())[ci - 1], selected_values, ci,
+                                                           unique_values))
 
             total_samples = sum(item[0] for item in sampling_results_per_cycles_option)
             status = all(item[1] for item in sampling_results_per_cycles_option)
@@ -427,10 +456,10 @@ class AnalyzeFastqData:
         xs_results.append([[r[0] for r in results if r[1] is False], False])
 
         hist_name_file = 'bc=' + str(bc) \
-                             + '_K=' + str(K) \
-                             + '_t=' + str(t) \
-                             + '_n=' + str(n) \
-                             + '_cycles_list=' + str(cycles_list)
+                         + '_K=' + str(K) \
+                         + '_t=' + str(t) \
+                         + '_n=' + str(n) \
+                         + '_cycles_list=' + str(cycles_list)
 
         for xs, status in xs_results:
             # Plot histogram
@@ -439,13 +468,13 @@ class AnalyzeFastqData:
             plt.xlabel('# Reads')
             plt.ylabel('Frequency')
             plt.legend(loc='upper right')
-            plt.title(hist_name_file+ 'status=' + str(status))
+            plt.title(hist_name_file + 'status=' + str(status))
 
-            plt.savefig(self.output_hist_coupon_collector_folder+hist_name_file+ 'status=' + str(status))
+            plt.savefig(self.output_hist_coupon_collector_folder + hist_name_file + 'status=' + str(status))
             plt.close()
-            print(hist_name_file+ 'status=' + str(status))
+            print(hist_name_file + 'status=' + str(status))
 
-        file_name=self.output_csv_coupon_collector_folder+hist_name_file+'.csv'
+        file_name = self.output_csv_coupon_collector_folder + hist_name_file + '.csv'
 
         headers = ["Sample", "Status", "Design", "Sample", "Cycle", "Unique values"]
 
@@ -681,5 +710,8 @@ class AnalyzeFastqData:
         # # Create graph with sampling rate
         # self.create_sampling_rate_from_good_reads_graph()
 
-        # We want to find
-        self.the_coupon_collector_problem_with_t()
+        # 
+        self.compare_payloads_of_two_bc(bc1=1, bc2=2)
+
+        # # We want to find
+        # self.the_coupon_collector_problem_with_t()
