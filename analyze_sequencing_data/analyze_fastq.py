@@ -1,6 +1,8 @@
 import ast
 import heapq
 from pathlib import Path
+
+import copy
 from typing import Union, Dict, List, Tuple
 
 import numpy as np
@@ -17,13 +19,14 @@ import utilities.utilities as utilities
 
 
 def compare_with_errors(read, seq, max_dist=3):
-    return sum(r != s for r, s in zip(read, seq)) <= max_dist
+    return (sum(r != s for r, s in zip(read, seq)) <= max_dist), sum(r != s for r, s in zip(read, seq))
 
 
 def verify_const_universal(read, const_design):
     for s_idx, s in const_design.iterrows():
         pos = int(s['Pos'])
-        if not compare_with_errors(read[pos:pos + 20], s['Seq']):
+        is_no_errors, dist = compare_with_errors(read[pos:pos + 20], s['Seq'])
+        if not is_no_errors:
             return False
     return True
 
@@ -41,6 +44,7 @@ class AnalyzeFastqData:
                  barcodes_design_file: Union[Path, str],
                  len_reads_hist_output_file: Union[Path, str],
                  results_good_reads_file: Union[Path, str],
+                 results_good_reads_with_dist_per_cycle_file: Union[Path, str],
                  results_most_common_file: Union[Path, str],
                  design_simulation_file: Union[Path, str],
                  compare_design_to_experiment_results_output_file: Union[Path, str],
@@ -80,6 +84,7 @@ class AnalyzeFastqData:
         self.payload_design_file = payload_design_file
         self.barcodes_design_file = barcodes_design_file
         self.results_good_reads_file = results_good_reads_file
+        self.results_good_reads_with_dist_per_cycle_file = results_good_reads_with_dist_per_cycle_file
         self.len_reads_hist_output_file = len_reads_hist_output_file
         self.results_most_common_file = results_most_common_file
         self.design_simulation_file = design_simulation_file
@@ -119,32 +124,35 @@ class AnalyzeFastqData:
 
     def identify_oligo(self, read, payload_design, barcodes_design):
         bc = self.identify_barcode(read, barcodes_design)
-        payload = self.identify_payload(read, payload_design)
+        payload, res_dist = self.identify_payload(read, payload_design)
         payload.insert(0, bc)
-        return payload
+        return payload, res_dist
 
     # Identify which payload in each position
     def identify_payload(self, read, payload_design):
         res = [0, ] * len(self.payload_pos)
+        res_dist = [0, ] * len(self.payload_pos)
         for p_idx, pos in enumerate(self.payload_pos):
             for s_idx, s in payload_design.iterrows():
-                if compare_with_errors(read[pos:pos + 20], s['Seq']):
+                is_no_errors, dist = compare_with_errors(read[pos:pos + 20], s['Seq'])
+                if is_no_errors:
                     res[p_idx] = s_idx
+                    res_dist[p_idx] = dist
                     break
-        return res
+        return res, res_dist
 
     # Identify which barcode in each position
     def identify_barcode(self, read, barcodes_design):
         pos = self.barcode_len
         for s_idx, s in barcodes_design.iterrows():
-            if compare_with_errors(read[pos:pos + 20], s['Seq']):
+            is_no_errors, dist = compare_with_errors(read[pos:pos + 20], s['Seq'])
+            if is_no_errors:
                 return s_idx
         return 0
 
     def open_fastq(self) -> List[str]:
         with open(self.input_file, 'r') as inf:
             reads = list(SeqIO.parse(inf, 'fastq'))
-
         return reads
 
     def reads_len_hist(self, reads: List[str]) -> None:
@@ -176,6 +184,7 @@ class AnalyzeFastqData:
                              payload_design: pd.DataFrame,
                              barcodes_design: pd.DataFrame) -> None:
         res = list()
+        res_with_dist = list()
         failed = 0
         read_idx = 0
         none = SeqIO.SeqRecord("None")
@@ -184,24 +193,40 @@ class AnalyzeFastqData:
             cols_names = [['bc', 'c1', 'c2', 'c3', 'c4']]
             np.savetxt(f, cols_names, fmt='%s', delimiter=",")
 
+        with open(self.results_good_reads_with_dist_per_cycle_file, "ab") as f:
+            cols_names = [['bc', 'c1', 'c2', 'c3', 'c4', 'd1', 'd2', 'd3', 'd4']]
+            np.savetxt(f, cols_names, fmt='%s', delimiter=",")
+
         for read_idx, read in enumerate(reads):
             if read_idx % 1000 == 999:
                 print(f'processed {read_idx + 1} reads, {failed} ({100 * failed / (read_idx + 1) : .2f}%) failed')
                 with open(self.results_good_reads_file, "ab") as f:
                     np.savetxt(f, res, fmt='%i', delimiter=",")
+                with open(self.results_good_reads_with_dist_per_cycle_file, "ab") as f:
+                    np.savetxt(f, res_with_dist, fmt='%i', delimiter=",")
                 res = list()
+                res_with_dist = list()
             read = verify_const_universal_and_reverse_complement(read, const_design)
             if read.seq == none.seq:
                 failed += 1
                 continue
 
-            res.append(self.identify_oligo(read, payload_design, barcodes_design))
+            # Results for good reads
+            payload, res_dist = self.identify_oligo(read, payload_design, barcodes_design)
+            res.append(payload)
+
+            payload_copy = copy.deepcopy(payload)
+            payload_copy.extend(res_dist)
+            res_with_dist.append(payload_copy)
+
             if res[-1].__contains__(0):
                 failed += 1
 
         print(f'processed {read_idx + 1} reads, {failed} ({100 * failed / (read_idx + 1) : .2f}%) failed')
         with open(self.results_good_reads_file, "ab") as f:
             np.savetxt(f, res, fmt='%i', delimiter=",")
+        with open(self.results_good_reads_with_dist_per_cycle_file, "ab") as f:
+            np.savetxt(f, res_with_dist, fmt='%i', delimiter=",")
 
     def compare_payloads_of_two_bc(self, bc1, bc2):
         df_foreach_bc_payload_count = pd.read_csv(self.foreach_bc_payload_count_file)
@@ -222,11 +247,10 @@ class AnalyzeFastqData:
             plt.xticks(range(amount_of_payloads))
             plt.xlim(0.5, amount_of_payloads)
             plt.ylim(0, 0.5)
-            plt.title('bc=[' + str(bc1) +','+ str(bc2)+'], cycle=' + cycle)
+            plt.title('bc=[' + str(bc1) + ',' + str(bc2) + '], cycle=' + cycle)
             utilities.is_dir_exists(self.hist_per_bc_file)
             plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.png')
             plt.close()
-
 
     def hist_per_bc(self, dict_bc_payload, bc, payload):
         plt.bar(dict_bc_payload.keys(), dict_bc_payload.values())
@@ -379,12 +403,16 @@ class AnalyzeFastqData:
         sample_rows = []
         sampled_indices = []
         column = 'c' + str(column_idx)
+        skipped_zero_count = 0
+
         while len([k for k, v in unique_values.items() if v >= t]) < K:
             sample = df.drop(sampled_indices).sample()
             sampled_indices.append(sample.index[0])
             value = sample.iloc[0][column]
             if value != 0:
                 unique_values[value] = unique_values.get(value, 0) + 1
+            else:
+                skipped_zero_count += 1
             sample_rows.append(sample)
 
         # Select K unique values that each appeared at least t times
@@ -393,7 +421,7 @@ class AnalyzeFastqData:
         # Create a DataFrame with only the selected values
         result_df = pd.concat([row for row in sample_rows if row.iloc[0][column] in unique_values])
 
-        return result_df, selected_values, unique_values
+        return result_df, selected_values, unique_values, skipped_zero_count
 
     def random_sample_and_compare(self, data_df, design_df, n, K, bc, cycles_list, t):
         sampling_results = []
@@ -402,8 +430,9 @@ class AnalyzeFastqData:
         for _ in range(n):
             sampling_results_per_cycles_option = []
             for ci in cycles_list:
-                sampled_df, selected_values, unique_values = self.sample_till_K_unique(data_df.loc[data_df['bc'] == bc],
-                                                                                       ci, K, t)
+                sampled_df, selected_values, unique_values, skipped_zero_count = self.sample_till_K_unique(
+                    data_df.loc[data_df['bc'] == bc],
+                    ci, K, t)
                 is_design_equal_sampled_data = list(design_x.values())[ci - 1] == selected_values
                 sampling_results_per_cycles_option.append((len(sampled_df), is_design_equal_sampled_data,
                                                            list(design_x.values())[ci - 1], selected_values, ci,
@@ -417,7 +446,7 @@ class AnalyzeFastqData:
             unique_values = [item[5] for item in sampling_results_per_cycles_option]
             sampling_results.append([total_samples, status, design, selected_values, ci, unique_values])
 
-        return sampling_results
+        return sampling_results, skipped_zero_count
 
     def plot_results(self, results):
         xs = [r[0] for r in results]
@@ -442,39 +471,59 @@ class AnalyzeFastqData:
                 for t in self.t_list:
                     for n in self.n_list:
                         # perform the operation
-                        results = self.random_sample_and_compare(data_df, design_df, n=n, K=K, bc=bc,
-                                                                 cycles_list=cycles, t=t)
+                        results, skipped_zero_count = self.random_sample_and_compare(data_df, design_df, n=n, K=K,
+                                                                                     bc=bc,
+                                                                                     cycles_list=cycles, t=t)
 
                         # plot the results
-                        self.hist_of_the_coupon_collector_problem_with_t(results, K, t, n, cycles, bc)
+                        self.hist_of_the_coupon_collector_problem_with_t(results, K, t, n, cycles, bc,
+                                                                         skipped_zero_count)
 
-    def hist_of_the_coupon_collector_problem_with_t(self, results, K, t, n, cycles_list, bc):
-        # xs = [r[0] for r in results]
+    def hist_of_the_coupon_collector_problem_with_t(self, results, K, t, n, cycles_list, bc, skipped_zero_count,
+                                                    is_histogram_of_true_n_false=True):
+
         xs_results = []
-
-        xs_results.append([[r[0] for r in results if r[1] is True], True])
-        xs_results.append([[r[0] for r in results if r[1] is False], False])
-
-        hist_name_file = 'bc=' + str(bc) \
-                         + '_K=' + str(K) \
-                         + '_t=' + str(t) \
-                         + '_n=' + str(n) \
-                         + '_cycles_list=' + str(cycles_list)
+        if is_histogram_of_true_n_false:
+            xs_results.append([[r[0] for r in results], 'True And False'])
+        else:
+            xs_results.append([[r[0] for r in results if r[1] is True], True])
+            xs_results.append([[r[0] for r in results if r[1] is False], False])
 
         for xs, status in xs_results:
+            fig, ax = plt.subplots(figsize=(10, 8))
+
+            hist_name_file = ['bc=' + str(bc)
+                , 'K=' + str(K)
+                , 't=' + str(t)
+                , 'n=' + str(n)
+                , 'cycles_list=' + str(cycles_list)]
+
+            # Expectation calculation
+            expectation_value = sum(xs) / len(xs) if xs else 0
+            hist_name_file.extend(['expectation=' + str(round(expectation_value)),
+                                   'skipped_zero_count=' + str(skipped_zero_count),
+                                   'status=' + str(status)])
+
             # Plot histogram
-            plt.hist(xs, bins=10, alpha=0.5, label='Number of samples')
+            ax.hist(xs, bins=10, alpha=0.5, label='Number of samples')
 
-            plt.xlabel('# Reads')
-            plt.ylabel('Frequency')
-            plt.legend(loc='upper right')
-            plt.title(hist_name_file + 'status=' + str(status))
+            ax.set_xlabel('# Reads')
+            ax.set_ylabel('Frequency')
+            ax.legend(loc='upper right')
+            ax.set_title("Sampling Rate")
+            # plt.figtext(0.85, 0.85, "\n".join(hist_name_file), fontsize=8)
+            # ax.annotate("\n".join(hist_name_file), xy=(0.5, 0.5), xytext=(0, 0),
+            #             textcoords='figure fraction', fontsize=10,
+            #             bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
+            plt.subplots_adjust(right=0.8)  # Adjust the bottom leaving space for your description
+            fig.text(0.82, 0.5, "\n".join(hist_name_file), ha='left', va='center',
+                     fontsize=10, bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
 
-            plt.savefig(self.output_hist_coupon_collector_folder + hist_name_file + 'status=' + str(status))
-            plt.close()
-            print(hist_name_file + 'status=' + str(status))
+            fig.savefig(self.output_hist_coupon_collector_folder + "_".join(hist_name_file))
+            plt.close(fig)
+            print(hist_name_file)
 
-        file_name = self.output_csv_coupon_collector_folder + hist_name_file + '.csv'
+        file_name = self.output_csv_coupon_collector_folder + "_".join(hist_name_file) + '.csv'
 
         headers = ["Sample", "Status", "Design", "Sample", "Cycle", "Unique values"]
 
@@ -710,7 +759,7 @@ class AnalyzeFastqData:
         # Create graph with sampling rate
         self.create_sampling_rate_from_good_reads_graph()
 
-        # compare_payloads_of_two_bc
+        # Compare Payloads_of_two_bc
         self.compare_payloads_of_two_bc(bc1=1, bc2=2)
 
         # We want to find

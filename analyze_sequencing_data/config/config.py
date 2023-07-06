@@ -56,6 +56,7 @@ def build_config():
         'barcodes_design_file': "analyze_sequencing_data/config/barcodes_design.csv",
         'payload_design_file': "analyze_sequencing_data/config/payload_design.csv",
         'results_good_reads_file': "analyze_sequencing_data/output/csv/results_good_reads.csv",
+        'results_good_reads_with_dist_per_cycle_file': "analyze_sequencing_data/output/csv/results_good_reads_with_dist_per_cycle_file.csv",
         'count_reads_for_each_bc_file': "analyze_sequencing_data/output/csv/count_reads_for_each_bc.csv",
         'missing_bcs_file': "analyze_sequencing_data/output/csv/missing_bc.csv",
         'output_csv_folder': "analyze_sequencing_data/output/csv/",
@@ -80,10 +81,10 @@ def build_config():
         'design_simulation_file': 'analyze_sequencing_data/data/sequence_design_file.dna',
 
         # Params for the coupon collector problem
-        't_list': [1, 2, 3, 4, 5],
+        't_list': [1, 2],
         # 'n_list': [500, 1000, 1500],
-        'n_list': [1500],
-        'cycles_list': [[1], [2], [3], [4], [1, 2, 3, 4]],
+        'n_list': [2000],
+        'cycles_list': [[4], [1, 2, 3, 4]],
         'bc_list': [1, 2]
     }
 

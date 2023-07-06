@@ -11,6 +11,7 @@ if __name__ == '__main__':
                                           barcodes_design_file=config['barcodes_design_file'],
                                           len_reads_hist_output_file=config['len_reads_hist_output_file'],
                                           results_good_reads_file=config['results_good_reads_file'],
+                                          results_good_reads_with_dist_per_cycle_file=config['results_good_reads_with_dist_per_cycle_file'],
                                           results_most_common_file=config['results_most_common_file'],
                                           design_simulation_file=config['design_simulation_file'],
                                           compare_design_to_experiment_results_output_file=config[
