@@ -48,6 +48,8 @@ def build_config():
         'amount_of_cycles': ['c1', 'c2', 'c3', 'c4'],
         'k_mer_representative_to_z': k_mer_representative_to_z,
         'z_to_k_mer_representative': z_to_k_mer_representative,
+        'hamming_dist': [0, 1, 2, 3],
+        'no_hamming_dist': 0,
 
         # 167 BC analysis
         'input_file': "analyze_sequencing_data/data/output_prefix.assembled.fastq",
@@ -81,11 +83,13 @@ def build_config():
         'design_simulation_file': 'analyze_sequencing_data/data/sequence_design_file.dna',
 
         # Params for the coupon collector problem
-        't_list': [1, 2],
+        't_list': [1, 2, 3, 4],
         # 'n_list': [500, 1000, 1500],
-        'n_list': [2000],
+        'n_list': [500],
         'cycles_list': [[4], [1, 2, 3, 4]],
-        'bc_list': [1, 2]
+        'bc_list': [1, 2],
+        'hamming_dist_for_count': [1, 2, 3],
+        'hamming_dist_to_include_list': [[0], [0, 1, 2, 3]]
     }
 
     return config

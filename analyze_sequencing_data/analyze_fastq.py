@@ -77,7 +77,10 @@ class AnalyzeFastqData:
                  bc_list: List,
                  output_csv_coupon_collector_folder: Union[Path, str],
                  output_hist_coupon_collector_folder: Union[Path, str],
-                 amount_of_cycles: List
+                 amount_of_cycles: List,
+                 hamming_dist: List,
+                 hamming_dist_for_count: List,
+                 hamming_dist_to_include_list: List
                  ):
         self.input_file = input_file
         self.const_design_file = const_design_file
@@ -119,6 +122,9 @@ class AnalyzeFastqData:
         self.output_csv_coupon_collector_folder = output_csv_coupon_collector_folder
         self.output_hist_coupon_collector_folder = output_hist_coupon_collector_folder
         self.amount_of_cycles = amount_of_cycles
+        self.hamming_dist = hamming_dist
+        self.hamming_dist_for_count = hamming_dist_for_count
+        self.hamming_dist_to_include_list = hamming_dist_to_include_list
 
     # Verify universal
 
@@ -241,25 +247,36 @@ class AnalyzeFastqData:
             total2 = sum(bc2_cycle_i.values())
             bc2_cycle_i = {k: v / total2 for k, v in bc2_cycle_i.items()}
 
-            plt.bar(bc1_cycle_i.keys(), bc1_cycle_i.values(), color='#4169E1')
-            plt.bar(bc2_cycle_i.keys(), bc2_cycle_i.values(), color='gray', alpha=0.7)
+            plt.bar(bc1_cycle_i.keys(), bc1_cycle_i.values(), color='#4169E1', label='bc1')
+            plt.bar(bc2_cycle_i.keys(), bc2_cycle_i.values(), color='gray', alpha=0.7, label='bc2')
             amount_of_payloads = self.amount_of_payloads + 1
             plt.xticks(range(amount_of_payloads))
+            plt.xlabel("payloads")
+            plt.ylabel("percentage of reads")
             plt.xlim(0.5, amount_of_payloads)
             plt.ylim(0, 0.5)
+            plt.legend()
             plt.title('bc=[' + str(bc1) + ',' + str(bc2) + '], cycle=' + cycle)
             utilities.is_dir_exists(self.hist_per_bc_file)
-            plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.png')
+            plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.svg')
             plt.close()
 
     def hist_per_bc(self, dict_bc_payload, bc, payload):
+        # Normalize dict_bc_payload if possible
+        total = sum(dict_bc_payload.values())
+        if total != 0:
+            dict_bc_payload = {k: v / total for k, v in dict_bc_payload.items()}
+
         plt.bar(dict_bc_payload.keys(), dict_bc_payload.values())
         amount_of_payloads = self.amount_of_payloads + 1
         plt.xticks(range(amount_of_payloads))
         plt.xlim(0.5, amount_of_payloads)
-        plt.title('bc=' + str(bc) + 'payload=' + payload)
+        plt.ylim(0, 0.5)
+        plt.xlabel("payloads")
+        plt.ylabel("percentage of reads")
+        plt.title('bc=' + str(bc) + 'cycle=' + payload)
         utilities.is_dir_exists(self.hist_per_bc_file)
-        plt.savefig(self.hist_per_bc_file + '/bc=' + str(bc) + '_payload=' + payload + '_hist.png')
+        plt.savefig(self.hist_per_bc_file + '/bc=' + str(bc) + '_cycle=' + payload + '_hist.svg')
         plt.close()
 
     def analyze_results_good_reads(self) -> Dict:
@@ -398,55 +415,90 @@ class AnalyzeFastqData:
             design_dict[key] = values
         return design_dict
 
-    def sample_till_K_unique(self, df: pd.DataFrame, column_idx: List, K: int, t: int):
+    def sample_till_K_unique(self, df: pd.DataFrame, column_idx: List, K: int, t: int, hamming_dist_to_include: List):
         unique_values = {}
         sample_rows = []
         sampled_indices = []
-        column = 'c' + str(column_idx)
+        column_cycle_name = 'c' + str(column_idx)
+        column_dist_name = 'd' + str(column_idx)
         skipped_zero_count = 0
+        hamming_dist_bigger_then_0 = 0
 
         while len([k for k, v in unique_values.items() if v >= t]) < K:
-            sample = df.drop(sampled_indices).sample()
-            sampled_indices.append(sample.index[0])
-            value = sample.iloc[0][column]
+            # Choose sample from file
+            sample_read = df.drop(sampled_indices).sample()
+            # Find the dist value
+            dist_value = sample_read.iloc[0][column_dist_name]
+
+            value = sample_read.iloc[0][column_cycle_name]
+
+            if dist_value not in hamming_dist_to_include or value == 0:
+                skipped_zero_count += 1
+
+            if dist_value in self.hamming_dist_for_count:
+                hamming_dist_bigger_then_0 += 1
+
+            sampled_indices.append(sample_read.index[0])
             if value != 0:
                 unique_values[value] = unique_values.get(value, 0) + 1
-            else:
-                skipped_zero_count += 1
-            sample_rows.append(sample)
+
+            sample_rows.append(sample_read)
 
         # Select K unique values that each appeared at least t times
         selected_values = set([k for k, v in unique_values.items() if v >= t][:K])
 
         # Create a DataFrame with only the selected values
-        result_df = pd.concat([row for row in sample_rows if row.iloc[0][column] in unique_values])
+        result_df = pd.concat([row for row in sample_rows if row.iloc[0][column_cycle_name] in unique_values])
 
-        return result_df, selected_values, unique_values, skipped_zero_count
+        return result_df, selected_values, unique_values, skipped_zero_count, hamming_dist_bigger_then_0
 
-    def random_sample_and_compare(self, data_df, design_df, n, K, bc, cycles_list, t):
-        sampling_results = []
+    def random_sample_and_compare(self, data_df: pd.DataFrame, design_df: pd.DataFrame, n: int, K: int, bc: int,
+                                  cycles_list: List, t: int, hamming_dist_to_include: List):
+
+        total_samples_list = []
+        status_list = []
+        design_list = []
+        selected_values_list = []
+        ci_list = []
+        unique_values_list = []
+        hamming_dist_bigger_then_0_list = []
+        skipped_zero_count_list = []
         design_x = design_df.loc[design_df['bc'] == bc, 'design_x'].iloc[0]
 
         for _ in range(n):
-            sampling_results_per_cycles_option = []
+            sampled_count_all_cycles = 0
+            status_all_cycles_bool = True
+            design_list_all_cycles = []
+            selected_values_all_cycles = []
+            unique_values_all_cycles = []
+            hamming_dist_bigger_then_0_count_all_cycles = 0
+            skipped_zero_count_all_cycles = 0
             for ci in cycles_list:
-                sampled_df, selected_values, unique_values, skipped_zero_count = self.sample_till_K_unique(
+                sampled_df, selected_values, unique_values, skipped_zero_count, hamming_dist_bigger_then_0 = self.sample_till_K_unique(
                     data_df.loc[data_df['bc'] == bc],
-                    ci, K, t)
+                    ci, K, t, hamming_dist_to_include)
                 is_design_equal_sampled_data = list(design_x.values())[ci - 1] == selected_values
-                sampling_results_per_cycles_option.append((len(sampled_df), is_design_equal_sampled_data,
-                                                           list(design_x.values())[ci - 1], selected_values, ci,
-                                                           unique_values))
 
-            total_samples = sum(item[0] for item in sampling_results_per_cycles_option)
-            status = all(item[1] for item in sampling_results_per_cycles_option)
-            design = [item[2] for item in sampling_results_per_cycles_option]
-            selected_values = [item[3] for item in sampling_results_per_cycles_option]
-            ci = [item[4] for item in sampling_results_per_cycles_option]
-            unique_values = [item[5] for item in sampling_results_per_cycles_option]
-            sampling_results.append([total_samples, status, design, selected_values, ci, unique_values])
+                sampled_count_all_cycles += len(sampled_df)
+                status_all_cycles_bool = status_all_cycles_bool and is_design_equal_sampled_data
+                hamming_dist_bigger_then_0_count_all_cycles += hamming_dist_bigger_then_0
+                skipped_zero_count_all_cycles += skipped_zero_count
+                design_list_all_cycles.extend([list(design_x.values())[ci - 1]])
+                selected_values_all_cycles.extend([selected_values])
+                unique_values_all_cycles.extend([list(unique_values.keys())])
 
-        return sampling_results, skipped_zero_count
+            total_samples_list.append([sampled_count_all_cycles])
+            status_list.append(status_all_cycles_bool)
+            design_list.extend([design_list_all_cycles])
+            selected_values_list.extend(selected_values)
+            ci_list.append(cycles_list)
+            unique_values_list.extend([unique_values_all_cycles])
+            hamming_dist_bigger_then_0_list.append(hamming_dist_bigger_then_0_count_all_cycles)
+            skipped_zero_count_list.append(skipped_zero_count_all_cycles)
+
+        return total_samples_list, status_list, design_list, \
+               selected_values_list, ci_list, unique_values_list, \
+               hamming_dist_bigger_then_0_list, skipped_zero_count_list
 
     def plot_results(self, results):
         xs = [r[0] for r in results]
@@ -460,7 +512,7 @@ class AnalyzeFastqData:
         K = self.subset_size
 
         # read csv data
-        data_df = pd.read_csv(self.results_good_reads_file)
+        data_df = pd.read_csv(self.results_good_reads_with_dist_per_cycle_file)
 
         # convert design file to dataframe
         design_df = pd.read_csv(self.compare_design_to_experiment_results_output_file)
@@ -470,62 +522,94 @@ class AnalyzeFastqData:
             for cycles in list(self.cycles_list):
                 for t in self.t_list:
                     for n in self.n_list:
-                        # perform the operation
-                        results, skipped_zero_count = self.random_sample_and_compare(data_df, design_df, n=n, K=K,
-                                                                                     bc=bc,
-                                                                                     cycles_list=cycles, t=t)
+                        for hamming_dist_to_include in self.hamming_dist_to_include_list:
+                            # perform the operation
+                            total_samples_list, status_list, design_list, \
+                            selected_values_list, ci_list, unique_values_list, \
+                            hamming_dist_bigger_then_0_list, skipped_zero_count_list \
+                                = self.random_sample_and_compare(data_df, design_df, n=n, K=K,
+                                                                 bc=bc,
+                                                                 cycles_list=cycles, t=t,
+                                                                 hamming_dist_to_include=hamming_dist_to_include)
 
-                        # plot the results
-                        self.hist_of_the_coupon_collector_problem_with_t(results, K, t, n, cycles, bc,
-                                                                         skipped_zero_count)
+                            # plot the results
+                            self.hist_of_the_coupon_collector_problem_with_t(K, t, n, cycles, bc, total_samples_list,
+                                                                             status_list, design_list,
+                                                                             selected_values_list,
+                                                                             ci_list, unique_values_list,
+                                                                             hamming_dist_bigger_then_0_list,
+                                                                             skipped_zero_count_list,
+                                                                             hamming_dist_to_include)
 
-    def hist_of_the_coupon_collector_problem_with_t(self, results, K, t, n, cycles_list, bc, skipped_zero_count,
+    def hist_of_the_coupon_collector_problem_with_t(self, K, t, n, cycles_list, bc,
+                                                    total_samples_list, status_list, design_list,
+                                                    selected_values_list, ci_list, unique_values_list,
+                                                    hamming_dist_bigger_then_0_list, skipped_zero_count_list,
+                                                    hamming_dist_to_include,
                                                     is_histogram_of_true_n_false=True):
 
         xs_results = []
+        results = list(zip(total_samples_list, status_list, design_list,
+                           selected_values_list, ci_list, unique_values_list,
+                           hamming_dist_bigger_then_0_list, skipped_zero_count_list))
         if is_histogram_of_true_n_false:
-            xs_results.append([[r[0] for r in results], 'True And False'])
+            xs_results.append([[r[0] for r in results], 'T&F'])
+
+            true_false_values = [item[1] for item in results]
+
+            # Count the number of True and False values
+            num_true = true_false_values.count(True)
+            num_false = true_false_values.count(False)
+
+            # Calculate the ratio
+            true_false_ratio = num_true / (num_true + num_false)
         else:
             xs_results.append([[r[0] for r in results if r[1] is True], True])
             xs_results.append([[r[0] for r in results if r[1] is False], False])
 
         for xs, status in xs_results:
-            fig, ax = plt.subplots(figsize=(10, 8))
+            plt.rc('xtick', labelsize=16)
+            plt.rc('ytick', labelsize=16)
+            fig, ax = plt.subplots(figsize=(20, 16))
 
             hist_name_file = ['bc=' + str(bc)
                 , 'K=' + str(K)
                 , 't=' + str(t)
                 , 'n=' + str(n)
-                , 'cycles_list=' + str(cycles_list)]
+                , 'cycles=' + str(cycles_list)
+                , 'hamming2include=' + str(hamming_dist_to_include)]
+
+            hist_description_file = copy.deepcopy(hist_name_file)
 
             # Expectation calculation
-            expectation_value = sum(xs) / len(xs) if xs else 0
-            hist_name_file.extend(['expectation=' + str(round(expectation_value)),
-                                   'skipped_zero_count=' + str(skipped_zero_count),
-                                   'status=' + str(status)])
+            xs_flattened_list = [num for sublist in xs for num in sublist]
+            expectation_value = sum(xs_flattened_list) / len(xs) if xs else 0
+            hamming_dist_bigger_then_0_sum = sum(hamming_dist_bigger_then_0_list)
+            hist_description_file.extend(['E=' + str(round(expectation_value, 2)),
+                                          'skipped0=' + str(sum(skipped_zero_count_list)),
+                                          'status=' + str(status),
+                                          'hammingBiggerThen0=' + str(hamming_dist_bigger_then_0_sum),
+                                          'T/(T+F)=' + str(true_false_ratio)])
 
             # Plot histogram
-            ax.hist(xs, bins=10, alpha=0.5, label='Number of samples')
+            ax.hist(xs_flattened_list, bins=20, alpha=0.5, label='Number of samples')
 
-            ax.set_xlabel('# Reads')
-            ax.set_ylabel('Frequency')
-            ax.legend(loc='upper right')
-            ax.set_title("Sampling Rate")
-            # plt.figtext(0.85, 0.85, "\n".join(hist_name_file), fontsize=8)
-            # ax.annotate("\n".join(hist_name_file), xy=(0.5, 0.5), xytext=(0, 0),
-            #             textcoords='figure fraction', fontsize=10,
-            #             bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
+            ax.set_xlabel('# Reads', fontsize=20)
+            ax.set_ylabel('Frequency', fontsize=20)
+            ax.legend(loc='upper right', fontsize=18)
+            ax.set_title("Sampling Rate", fontsize=22)
             plt.subplots_adjust(right=0.8)  # Adjust the bottom leaving space for your description
-            fig.text(0.82, 0.5, "\n".join(hist_name_file), ha='left', va='center',
-                     fontsize=10, bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
+            fig.text(0.82, 0.5, "\n".join(hist_description_file), ha='left', va='center',
+                     fontsize=16, bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
 
-            fig.savefig(self.output_hist_coupon_collector_folder + "_".join(hist_name_file))
+            fig.savefig(self.output_hist_coupon_collector_folder + "".join(hist_name_file) + str('.svg'))
             plt.close(fig)
             print(hist_name_file)
 
         file_name = self.output_csv_coupon_collector_folder + "_".join(hist_name_file) + '.csv'
 
-        headers = ["Sample", "Status", "Design", "Sample", "Cycle", "Unique values"]
+        headers = ["Total Sample", "Status", "Design", "Sample", "Cycle", "Unique values", "Hamming Dist bigger then 0",
+                   "Skipped zero count"]
 
         # Write to CSV
         with open(file_name, 'w', newline='') as f:

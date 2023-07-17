@@ -48,6 +48,9 @@ if __name__ == '__main__':
                                           bc_list=config['bc_list'],
                                           output_csv_coupon_collector_folder=config['output_csv_coupon_collector_folder'],
                                           output_hist_coupon_collector_folder=config['output_hist_coupon_collector_folder'],
-                                          amount_of_cycles=config['amount_of_cycles']
+                                          amount_of_cycles=config['amount_of_cycles'],
+                                          hamming_dist=config['hamming_dist'],
+                                          hamming_dist_for_count=config['hamming_dist_for_count'],
+                                          hamming_dist_to_include_list=config['hamming_dist_to_include_list']
                                           )
     analyze_fastq_data.run()
