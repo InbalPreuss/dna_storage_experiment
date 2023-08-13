@@ -51,6 +51,7 @@ if __name__ == '__main__':
                                           amount_of_cycles=config['amount_of_cycles'],
                                           hamming_dist=config['hamming_dist'],
                                           hamming_dist_for_count=config['hamming_dist_for_count'],
-                                          hamming_dist_to_include_list=config['hamming_dist_to_include_list']
+                                          hamming_dist_to_include_list=config['hamming_dist_to_include_list'],
+                                          results_table_for_two_bc_file=config['results_table_for_two_bc_file']
                                           )
     analyze_fastq_data.run()

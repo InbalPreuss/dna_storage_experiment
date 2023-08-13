@@ -65,6 +65,7 @@ def build_config():
         'output_csv_coupon_collector_folder': "analyze_sequencing_data/output/csv/coupon_collector/",
         'foreach_bc_payload_count_file': "analyze_sequencing_data/output/csv/foreach_bc_payload_count.csv",
         'compare_design_to_experiment_results_output_file': "analyze_sequencing_data/output/csv/compare_design_to_experiment_results.csv",
+        'results_table_for_two_bc_file': "analyze_sequencing_data/output/csv/results_table_for_two_bc.csv",
         'output_hist_folder': "analyze_sequencing_data/output/graphs/hist/",
         'output_folder': "analyze_sequencing_data/output/",
         'len_reads_hist_output_file': "analyze_sequencing_data/output/graphs/hist/len_reads_hist.png",

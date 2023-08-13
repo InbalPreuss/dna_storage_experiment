@@ -80,7 +80,8 @@ class AnalyzeFastqData:
                  amount_of_cycles: List,
                  hamming_dist: List,
                  hamming_dist_for_count: List,
-                 hamming_dist_to_include_list: List
+                 hamming_dist_to_include_list: List,
+                 results_table_for_two_bc_file: Union[Path, str]
                  ):
         self.input_file = input_file
         self.const_design_file = const_design_file
@@ -125,6 +126,7 @@ class AnalyzeFastqData:
         self.hamming_dist = hamming_dist
         self.hamming_dist_for_count = hamming_dist_for_count
         self.hamming_dist_to_include_list = hamming_dist_to_include_list
+        self.results_table_for_two_bc_file = results_table_for_two_bc_file
 
     # Verify universal
 
@@ -260,6 +262,32 @@ class AnalyzeFastqData:
             utilities.is_dir_exists(self.hist_per_bc_file)
             plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.svg')
             plt.close()
+
+    def create_results_table_for_two_bc(self, bc1, bc2):
+        # 1. Initialize the multi-level columns DataFrame
+        columns = pd.MultiIndex.from_product([['bc'+str(bc1), 'bc'+str(bc2)], ['c1', 'c2', 'c3', 'c4']],
+                                             names=['barcode', 'cycle'])
+        df = pd.DataFrame(columns=columns, index=['X' + str(i) for i in range(1, 17)])
+        # Assuming you already have this:
+        df_foreach_bc_payload_count = pd.read_csv(self.foreach_bc_payload_count_file)
+        # 2. Process the loaded CSV file for bc values for each cycle
+        for cycle in self.amount_of_cycles:
+            bc1_cycle_i = eval(df_foreach_bc_payload_count[str(bc1)][0])[cycle]
+            bc2_cycle_i = eval(df_foreach_bc_payload_count[str(bc2)][0])[cycle]
+            # Normalize values in the dictionaries
+            total1 = sum(bc1_cycle_i.values())
+            bc1_cycle_i = {k: v / total1 for k, v in bc1_cycle_i.items()}
+            total2 = sum(bc2_cycle_i.values())
+            bc2_cycle_i = {k: v / total2 for k, v in bc2_cycle_i.items()}
+            # 3. Insert values into the DataFrame. Here's an example:
+            for key in bc1_cycle_i:
+                df.loc['X'+str(key), ('bc1', cycle)] = bc1_cycle_i[key]
+            for key in bc2_cycle_i:
+                df.loc['X'+str(key), ('bc2', cycle)] = bc2_cycle_i[key]
+
+        df = df.drop(['X0'])
+        df.to_csv(self.results_table_for_two_bc_file)
+        print(df)
 
     def hist_per_bc(self, dict_bc_payload, bc, payload):
         # Normalize dict_bc_payload if possible
@@ -403,9 +431,15 @@ class AnalyzeFastqData:
         design_dict = {}
         for entry in entries:
             # Split the key from the values
-            key, values_str = entry.split(": ")
+            try:
+                key, values_str = entry.split(": ")
+            except:
+                print(f'entry={entry}')
             # Remove quotation marks from the key
-            key = key.strip("'")
+            try:
+                key = key.strip("'")
+            except:
+                print(key)
             # Split the values string into individual values and remove the 'X' prefix
             values_str = values_str.replace("(", "").replace(")", "").replace("X", "").replace("  ", ",").replace("'",
                                                                                                                   "").replace(
@@ -546,7 +580,7 @@ class AnalyzeFastqData:
                                                     selected_values_list, ci_list, unique_values_list,
                                                     hamming_dist_bigger_then_0_list, skipped_zero_count_list,
                                                     hamming_dist_to_include,
-                                                    is_histogram_of_true_n_false=True):
+                                                    is_histogram_of_true_n_false=True) -> str:
 
         xs_results = []
         results = list(zip(total_samples_list, status_list, design_list,
@@ -593,11 +627,11 @@ class AnalyzeFastqData:
 
             # Plot histogram
             ax.hist(xs_flattened_list, bins=20, alpha=0.5, label='Number of samples')
-
             ax.set_xlabel('# Reads', fontsize=20)
             ax.set_ylabel('Frequency', fontsize=20)
             ax.legend(loc='upper right', fontsize=18)
             ax.set_title("Sampling Rate", fontsize=22)
+
             plt.subplots_adjust(right=0.8)  # Adjust the bottom leaving space for your description
             fig.text(0.82, 0.5, "\n".join(hist_description_file), ha='left', va='center',
                      fontsize=16, bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=2))
@@ -845,6 +879,8 @@ class AnalyzeFastqData:
 
         # Compare Payloads_of_two_bc
         self.compare_payloads_of_two_bc(bc1=1, bc2=2)
+
+        self.create_results_table_for_two_bc(bc1=1, bc2=2)
 
         # We want to find
         self.the_coupon_collector_problem_with_t()
