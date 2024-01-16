@@ -249,18 +249,18 @@ class AnalyzeFastqData:
             total2 = sum(bc2_cycle_i.values())
             bc2_cycle_i = {k: v / total2 for k, v in bc2_cycle_i.items()}
 
-            plt.bar(bc1_cycle_i.keys(), bc1_cycle_i.values(), color='#4169E1', label='bc1')
-            plt.bar(bc2_cycle_i.keys(), bc2_cycle_i.values(), color='gray', alpha=0.7, label='bc2')
+            plt.bar(bc1_cycle_i.keys(), bc1_cycle_i.values(), color='#4169E1', label='BC1')
+            plt.bar(bc2_cycle_i.keys(), bc2_cycle_i.values(), color='gray', alpha=0.7, label='BC2')
             amount_of_payloads = self.amount_of_payloads + 1
             plt.xticks(range(amount_of_payloads))
-            plt.xlabel("payloads")
-            plt.ylabel("percentage of reads")
+            plt.xlabel("Payloads")
+            plt.ylabel("Fraction of Reads")
             plt.xlim(0.5, amount_of_payloads)
             plt.ylim(0, 0.5)
             plt.legend()
-            plt.title('bc=[' + str(bc1) + ',' + str(bc2) + '], cycle=' + cycle)
+            plt.title('BC=[' + str(bc1) + ',' + str(bc2) + '], Cycle=' + cycle)
             utilities.is_dir_exists(self.hist_per_bc_file)
-            plt.savefig(self.hist_per_bc_file + '/bc=[' + str(bc1) + ',' + str(bc2) + ']_cycle=' + cycle + '_hist.svg')
+            plt.savefig(self.hist_per_bc_file + '/BC=[' + str(bc1) + ',' + str(bc2) + '] Cycle=' + cycle + '_hist.svg')
             plt.close()
 
     def create_results_table_for_two_bc(self, bc1, bc2):
@@ -300,9 +300,9 @@ class AnalyzeFastqData:
         plt.xticks(range(amount_of_payloads))
         plt.xlim(0.5, amount_of_payloads)
         plt.ylim(0, 0.5)
-        plt.xlabel("payloads")
-        plt.ylabel("percentage of reads")
-        plt.title('bc=' + str(bc) + 'cycle=' + payload)
+        plt.xlabel("Payloads")
+        plt.ylabel("Fraction of Reads")
+        plt.title('BC=' + str(bc) + 'Cycle=' + payload)
         utilities.is_dir_exists(self.hist_per_bc_file)
         plt.savefig(self.hist_per_bc_file + '/bc=' + str(bc) + '_cycle=' + payload + '_hist.svg')
         plt.close()
@@ -362,7 +362,7 @@ class AnalyzeFastqData:
                                              key=dict_bc[bc_i][payload].get)
                 dict_bc_most_common[bc_i][payload] = most_common
 
-                print(f'bc = {bc_i}, cycle = {payload}, 5 most common = {most_common}')
+                print(f'Bc = {bc_i}, Cycle = {payload}, 5 most common = {most_common}')
                 self.hist_per_bc(dict_bc_payload=dict_bc[bc_i][payload], bc=bc_i, payload=payload)
 
         utilities.write_dict_to_csv(dict_bc_most_common, self.results_most_common_file)
@@ -880,6 +880,7 @@ class AnalyzeFastqData:
         # Compare Payloads_of_two_bc
         self.compare_payloads_of_two_bc(bc1=1, bc2=2)
 
+        # Create a summary of the results for BC1 and BC2 that will show the fraction of each k-mer in each cycle to each BC
         self.create_results_table_for_two_bc(bc1=1, bc2=2)
 
         # We want to find
