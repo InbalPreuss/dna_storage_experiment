@@ -1,9 +1,12 @@
 import ast
+import collections
 import heapq
+import os
+import shutil
 from pathlib import Path
 
 import copy
-from typing import Union, Dict, List, Tuple
+from typing import Union, Dict, List, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -81,8 +84,12 @@ class AnalyzeFastqData:
                  hamming_dist: List,
                  hamming_dist_for_count: List,
                  hamming_dist_to_include_list: List,
-                 results_table_for_two_bc_file: Union[Path, str]
+                 results_table_for_two_bc_file: Union[Path, str],
+                 output_all_sampling_rate_folder: Union[Path, str],
+                 design_results_only_z_file: Union[Path, str],
+                 sampling_rate_array: List,
                  ):
+        self.output_all_sampling_rate_folder = output_all_sampling_rate_folder
         self.input_file = input_file
         self.const_design_file = const_design_file
         self.payload_design_file = payload_design_file
@@ -127,6 +134,8 @@ class AnalyzeFastqData:
         self.hamming_dist_for_count = hamming_dist_for_count
         self.hamming_dist_to_include_list = hamming_dist_to_include_list
         self.results_table_for_two_bc_file = results_table_for_two_bc_file
+        self.design_results_only_z_file = design_results_only_z_file
+        self.sampling_rate_array = sampling_rate_array
 
     # Verify universal
 
@@ -265,7 +274,7 @@ class AnalyzeFastqData:
 
     def create_results_table_for_two_bc(self, bc1, bc2):
         # 1. Initialize the multi-level columns DataFrame
-        columns = pd.MultiIndex.from_product([['bc'+str(bc1), 'bc'+str(bc2)], ['c1', 'c2', 'c3', 'c4']],
+        columns = pd.MultiIndex.from_product([['bc' + str(bc1), 'bc' + str(bc2)], ['c1', 'c2', 'c3', 'c4']],
                                              names=['barcode', 'cycle'])
         df = pd.DataFrame(columns=columns, index=['X' + str(i) for i in range(1, 17)])
         # Assuming you already have this:
@@ -281,9 +290,9 @@ class AnalyzeFastqData:
             bc2_cycle_i = {k: v / total2 for k, v in bc2_cycle_i.items()}
             # 3. Insert values into the DataFrame. Here's an example:
             for key in bc1_cycle_i:
-                df.loc['X'+str(key), ('bc1', cycle)] = bc1_cycle_i[key]
+                df.loc['X' + str(key), ('bc1', cycle)] = bc1_cycle_i[key]
             for key in bc2_cycle_i:
-                df.loc['X'+str(key), ('bc2', cycle)] = bc2_cycle_i[key]
+                df.loc['X' + str(key), ('bc2', cycle)] = bc2_cycle_i[key]
 
         df = df.drop(['X0'])
         df.to_csv(self.results_table_for_two_bc_file)
@@ -307,10 +316,11 @@ class AnalyzeFastqData:
         plt.savefig(self.hist_per_bc_file + '/bc=' + str(bc) + '_cycle=' + payload + '_hist.svg')
         plt.close()
 
-    def analyze_results_good_reads(self) -> Dict:
+    def analyze_results_good_reads(self, input_csv_path: Union[Path, str],
+                                   dict_to_csv: Union[Path, str]) -> Dict:
         # read your csv to a dataframe
 
-        df = pd.read_csv(self.results_good_reads_file)
+        df = pd.read_csv(input_csv_path)
         dict_bc = {}
 
         amount_of_bc = self.amount_of_bc + 1
@@ -337,11 +347,11 @@ class AnalyzeFastqData:
 
                 dict_bc[int(row['bc'])][location_payload][int(payload)] += 1
 
-        utilities.write_dict_to_csv(dict_bc, self.foreach_bc_payload_count_file)
+        utilities.write_dict_to_csv(dict_bc, dict_to_csv)
 
         return dict_bc
 
-    def most_common_for_each_bc(self, dict_bc: Dict) -> None:
+    def most_common_for_each_bc(self, dict_bc: Dict, dict_to_csv_path: Union[Path, str]) -> None:
         dict_bc_most_common = {}
         amount_of_bc = self.amount_of_bc + 1
 
@@ -365,16 +375,19 @@ class AnalyzeFastqData:
                 print(f'Bc = {bc_i}, Cycle = {payload}, 5 most common = {most_common}')
                 self.hist_per_bc(dict_bc_payload=dict_bc[bc_i][payload], bc=bc_i, payload=payload)
 
-        utilities.write_dict_to_csv(dict_bc_most_common, self.results_most_common_file)
+        utilities.write_dict_to_csv(dict=dict_bc_most_common, csv_path=dict_to_csv_path)
 
-    def convert_most_common_to_letters_in_new_alphabet(self) -> Dict:
-        df = pd.read_csv(self.results_most_common_file, index_col=0)
+    def convert_most_common_to_letters_in_new_alphabet(self, results_most_common_file: Union[Path, str]) -> tuple[
+        dict[int, list[Any]], dict[int, list[Any]]]:
+        df = pd.read_csv(results_most_common_file, index_col=0)
         dict_most_common = df.to_dict("list")
         result_payload = {}
+        result_only_z = {}
         print(dict_most_common)
 
         for bc_i in range(1, (self.amount_of_bc + 1)):
             result_payload[bc_i] = []
+            result_only_z[bc_i] = []
             for payload in self.amount_of_cycles:
                 bc_i_str = str(bc_i)
                 d = ast.literal_eval(dict_most_common[bc_i_str][0])
@@ -389,17 +402,20 @@ class AnalyzeFastqData:
                 except KeyError:
                     z = 'Z1'  # The X tuple is out of range
                 result_payload[bc_i].append({z: dict_convert_to_x})
+                result_only_z[bc_i].append(z)
 
-        return result_payload
+        return result_payload, result_only_z
 
-    def compare_most_common_to_design(self, result_payload: Dict) -> None:
-        with open(self.compare_design_to_experiment_results_output_file, "ab") as f:
+    def compare_most_common_to_design(self, result_payload: Dict,
+                                      compare_design_to_experiment_results_output_file: Union[Path, str],
+                                      design_simulation_file: Union[Path, str]) -> None:
+        with open(compare_design_to_experiment_results_output_file, "ab") as f:
             cols_names = [
                 ['bc', 'design_z', 'design_x', 'experiment_results_z', 'experiment_results_x', 'is_retrieved_all_z',
                  'count_all_z_mm']]
             np.savetxt(f, cols_names, fmt='%s', delimiter=",")
 
-        with open(self.design_simulation_file, 'r') as inf:
+        with open(design_simulation_file, 'r') as inf:
             for bc_i_idx, bc_i_design in enumerate(inf):
                 count_all_z_mm = 0
 
@@ -655,7 +671,8 @@ class AnalyzeFastqData:
         print(f'Data written to {file_name}')
 
     def create_heatmap_with_rectangles_on_most_common(self, dict_foreach_bc_and_x_count_all_cycles_matrix: Dict,
-                                                      ax) -> None:
+                                                      heatmap_foreach_bc_and_x_count_with_most_common_file: Union[
+                                                          Path, str], ax) -> None:
 
         # remove col 0 and row 0
         del dict_foreach_bc_and_x_count_all_cycles_matrix[0]
@@ -698,10 +715,12 @@ class AnalyzeFastqData:
                         ))
                 cycle_idx += 1
 
-        plt.savefig(self.heatmap_foreach_bc_and_x_count_with_most_common_file, dpi=400)
+        plt.savefig(heatmap_foreach_bc_and_x_count_with_most_common_file, dpi=400)
         plt.close()
 
-    def heatmap_foreach_bc_and_x_count_with_most_common(self) -> None:
+    def heatmap_foreach_bc_and_x_count_with_most_common(self,
+                                                        heatmap_foreach_bc_and_x_count_with_most_common_file: Union[
+                                                            Path, str]) -> None:
         df = pd.read_csv(self.foreach_bc_payload_count_file)
         dict_foreach_bc_and_x_count_str = df.to_dict("list")
 
@@ -732,28 +751,40 @@ class AnalyzeFastqData:
         dict_foreach_bc_and_x_count_all_cycles_matrix = pd.DataFrame(dict_foreach_bc_and_x_count_all_cycles).T.fillna(0)
 
         self.create_heatmap_with_rectangles_on_most_common(dict_foreach_bc_and_x_count_all_cycles_matrix=
-                                                           dict_foreach_bc_and_x_count_all_cycles_matrix, ax=ax)
+                                                           dict_foreach_bc_and_x_count_all_cycles_matrix,
+                                                           heatmap_foreach_bc_and_x_count_with_most_common_file=heatmap_foreach_bc_and_x_count_with_most_common_file,
+                                                           ax=ax)
 
-    def find_most_common(self) -> None:
-        dict_bc = self.analyze_results_good_reads()
-        self.most_common_for_each_bc(dict_bc=dict_bc)
-        result_payload = self.convert_most_common_to_letters_in_new_alphabet()
-        self.compare_most_common_to_design(result_payload=result_payload)
+    def find_most_common(self, input_csv_path: Union[Path, str],
+                         foreach_bc_payload_count_file_dict_to_csv: Union[Path, str],
+                         most_common_dict_to_csv_path: Union[Path, str],
+                         compare_design_to_experiment_results_output_file: Union[Path, str],
+                         design_simulation_file: Union[Path, str],
+                         heatmap_foreach_bc_and_x_count_with_most_common_file: Union[Path, str]) -> None:
+        dict_bc = self.analyze_results_good_reads(input_csv_path=input_csv_path,
+                                                  dict_to_csv=foreach_bc_payload_count_file_dict_to_csv)
+        self.most_common_for_each_bc(dict_bc=dict_bc, dict_to_csv_path=most_common_dict_to_csv_path)
+        result_payload, result_only_z = self.convert_most_common_to_letters_in_new_alphabet(
+            results_most_common_file=most_common_dict_to_csv_path)
+        self.compare_most_common_to_design(result_payload=result_payload,
+                                           compare_design_to_experiment_results_output_file=compare_design_to_experiment_results_output_file,
+                                           design_simulation_file=design_simulation_file)
 
-        self.heatmap_foreach_bc_and_x_count_with_most_common()
+        self.heatmap_foreach_bc_and_x_count_with_most_common(
+            heatmap_foreach_bc_and_x_count_with_most_common_file=heatmap_foreach_bc_and_x_count_with_most_common_file)
 
     def missing_bc_to_csv(self, dict_append_missing_bc):
         ser_append_missing_bc = pd.Series(dict_append_missing_bc)
         ser_append_missing_bc.to_csv(self.missing_bcs_file, mode='a', header=False)
 
-    def create_sampling_rate_from_good_reads_graph(self) -> None:
+    def create_sampling_rate_from_good_reads_graph(self, input_csv_path: Path) -> None:
         """
         This function takes in a list of integers and creates a graph with the x-axis being the sampling rate
         and the y-axis being the count of different values in arr[0].
         The sampling rate will be in increments of 10% starting from 0% until 100%.
         """
 
-        df_good_reads = pd.read_csv(self.results_good_reads_file)
+        df_good_reads = pd.read_csv(input_csv_path)
 
         sampling_rates = [i / 10 for i in range(11)]  # create a list of sampling rates from 0% to 100%
         counts = []  # list to store counts of different values in arr[0]
@@ -776,12 +807,12 @@ class AnalyzeFastqData:
         plt.savefig(self.sampling_rate_from_good_reads_graph)
         plt.close()
 
-    def for_each_bc_count_reads_read_to_csv(self, output_file: Union[Path, str]) -> pd.DataFrame:
+    def for_each_bc_count_reads_read_to_csv(self, output_file: Union[Path, str], input_csv_path: Path) -> pd.DataFrame:
         with open(output_file, "ab") as f:
             cols_names = [['bc', 'count']]
             np.savetxt(f, cols_names, fmt='%s', delimiter=",")
 
-        df = pd.read_csv(self.results_good_reads_file)
+        df = pd.read_csv(input_csv_path)
         forth_column = df.iloc[:, 0]
         counts = forth_column.value_counts()
         count_sorted = counts.sort_index()
@@ -831,11 +862,284 @@ class AnalyzeFastqData:
         plt.savefig(self.hist_foreach_read_count_count_bc_file)
         plt.close()
 
-    def for_each_bc_count_reads_read(self, csv_output_file: Union[Path, str]) -> None:
-        self.for_each_bc_count_reads_read_to_csv(csv_output_file)
+    def move_output_to_sampling_percentage_directory(self, new_output_dir: str):
+        src_dir = self.output_folder
+        dst_dir = new_output_dir
+        # Create the destination directory if it does not exist
+        if not os.path.exists(dst_dir):
+            try:
+                os.makedirs(dst_dir)
+            except PermissionError:
+                print(f"Unable to create directory {dst_dir}: Permission denied")
+                return
+
+        # Change the permissions of the destination directory
+        try:
+            os.chmod(dst_dir, 0o777)
+        except PermissionError:
+            print(f"Unable to change permissions for directory {dst_dir}: Permission denied")
+            return
+
+        # Move the output files to the destination directory
+        for item in os.listdir(src_dir):
+            src_path = os.path.join(src_dir, item)
+            dst_path = os.path.join(dst_dir, item)
+            dst_path = dst_dir
+            if os.path.isfile(src_path):
+                try:
+                    # Check if a file with the same name already exists in the destination folder
+                    if os.path.exists(dst_path):
+                        # Rename the source file
+                        dst_path = os.path.join(dst_dir,
+                                                f"{os.path.splitext(item)[0]}_{len(os.listdir(dst_dir))}{os.path.splitext(item)[1]}")
+                    shutil.copy2(src_path, dst_path)
+                except PermissionError:
+                    print(f"Unable to copy file {src_path} to {dst_path}: Permission denied")
+            elif os.path.isdir(src_path):
+                try:
+                    # Check if the destination path already exists and is a directory
+                    if os.path.exists(dst_path) and os.path.isdir(dst_path):
+                        dst_path = os.path.join(dst_path, os.path.basename(src_path))
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copytree(src_path, dst_path)
+                except PermissionError:
+                    print(f"Unable to copy directory {src_path} to {dst_path}: Permission denied")
+            else:
+                print(f"Skipping {src_path} as it is not a file or directory")
+
+        # Change the permissions of the destination directory back to its original value
+        try:
+            os.chmod(dst_dir, 0o755)
+        except PermissionError:
+            print(f"Unable to change permissions for directory {dst_dir}: Permission denied")
+    def graph_of_all_sampling_most_common_x_to_each_bc(self):
+        all_results_count = {}
+        x_axis = []
+        df_design_results_only_z_file = pd.read_csv(self.design_results_only_z_file, index_col=0)
+
+        for folder_name in os.listdir(self.output_all_sampling_rate_folder):
+            # folder_path = os.path.join(self.output_all_sampling_rate_folder, folder_name, "csv")
+            if float(folder_name.split('_')[1]) not in [0.01, 0.005, 0.001]:
+                continue
+            sampling_percentage_folder = os.path.join(self.output_all_sampling_rate_folder, folder_name)
+            if os.path.isdir(sampling_percentage_folder):
+                sampling_percentage = float(folder_name.split("_")[-1])
+                all_results_count[sampling_percentage] = {}
+                if sampling_percentage not in self.sampling_rate_array:
+                    continue
+
+                for iteration_folder in os.listdir(sampling_percentage_folder):
+                    # sampling_percentage_folder = "output_all_sampling_rate/output_100"
+                    if iteration_folder.startswith("iter_"):
+                        all_results_count[sampling_percentage][iteration_folder] = []
+                        iter_path = os.path.join(sampling_percentage_folder, iteration_folder)
+                        csv_file = os.path.join(iter_path, "csv/foreach_bc_payload_count.csv")
+
+                        if os.path.exists(csv_file):
+                            data = pd.read_csv(csv_file, header=None)
+
+                # csv_file = os.path.join(folder_path, "foreach_bc_payload_count.csv")
+
+                            for bc_i, item in data.items():
+                                x_count_to_each_bc = []
+                                if bc_i == 0 or bc_i not in self.bc_list:
+                                    continue
+                                # Parse the dictionary from the cell
+                                dict_data = ast.literal_eval(item[1])
+
+                                for cycle_i, (cycle_name, payload_count_dict) in enumerate(dict_data.items()):
+                                    # Create a Counter from the dictionary
+                                    counter = collections.Counter(payload_count_dict)
+                                    # Remove if the payload is 0
+                                    del counter[0]
+                                    # Get the 4 most common items
+                                    most_common_payloads = counter.most_common(self.subset_size)
+                                    # Filter the payloads that have 0 appearances.
+                                    filtered_common = [item for item, count in most_common_payloads if count > 0]
+                                    x_count_to_each_bc.append(self.compare_amount_of_x_to_design(set_most_common_x_to_each_bc=set(filtered_common),
+                                                                       z=df_design_results_only_z_file[str(bc_i)][cycle_i]))
+
+                                all_results_count[sampling_percentage][iteration_folder].append(x_count_to_each_bc)
+
+        self.create_graph_avg_x_to_each_sampling(all_counts=all_results_count, graph_type='errorbar', x_axis_type='sampling_rate')
+        self.create_graph_avg_x_to_each_sampling(all_counts=all_results_count, graph_type='boxplot', x_axis_type='sampling_rate')
+        self.create_graph_avg_x_to_each_sampling(all_counts=all_results_count, graph_type='errorbar', x_axis_type='bc_avg_coverage')
+        self.create_graph_avg_x_to_each_sampling(all_counts=all_results_count, graph_type='boxplot', x_axis_type='bc_avg_coverage')
+
+
+    def compare_amount_of_x_to_design(self, set_most_common_x_to_each_bc, z):
+        z_to_x_tuple = self.z_to_k_mer_representative[z]
+        set_of_x_vals = set([int(x[1:]) for x in z_to_x_tuple])
+
+        # Get common elements
+        common_elements = set_most_common_x_to_each_bc.intersection(set_of_x_vals)
+
+        # Get count of common elements
+        count = len(common_elements)
+
+        return count
+
+    def calculate_average_coverage(self, csv_file: Union[Path, str]):
+            bc_count_df = pd.read_csv(csv_file)
+
+            # filter the DataFrame
+            filtered_df = bc_count_df[bc_count_df['bc'].isin(self.bc_list)]
+
+            # calculate the average of the 'count' column
+            avg_count = np.mean(filtered_df['count'])
+
+            return avg_count
+
+    def create_graph_avg_x_to_each_sampling(self, all_counts, graph_type, x_axis_type):
+        # x_axis = []
+        data = {}
+        data_avg = {}
+
+        for sampling_percentage, iterations_data in all_counts.items():
+            data[sampling_percentage] = []
+
+            # Determine the number of elements in each iteration (assuming equal for all iterations)
+            num_elements = len(
+                iterations_data[next(iter(iterations_data))])  # Get the length of one of the iteration lists
+
+            # Iterate over the number of elements
+            for i in range(num_elements):
+                temp_data = []
+
+                # Iterate over each iteration
+                for iteration in iterations_data:
+                    # Append the i-th element of each iteration
+                    # Check if the i-th element exists in this iteration
+                    if i < len(iterations_data[iteration]):
+                        temp_data.extend(iterations_data[iteration][i])
+                data[sampling_percentage].append(temp_data)  # Extract the value from the list
+
+        for folder_name in os.listdir(self.output_all_sampling_rate_folder):
+            if float(folder_name.split('_')[1]) not in [0.01, 0.005, 0.001]:
+                continue
+            x_axis = []
+            avg_count_per_iter = []
+            folder_path = os.path.join(self.output_all_sampling_rate_folder, folder_name)
+            sampling_percentage = float(folder_name.split("_")[-1])
+            # Add the sampling percentage and counts to the lists
+            if x_axis_type == 'sampling_rate':
+                x_axis.extend([sampling_percentage] * len(all_counts[sampling_percentage]))
+            elif x_axis_type == 'bc_avg_coverage':
+                    for iter_i, iterations in all_counts[sampling_percentage].items():
+                        csv_file_name = self.count_reads_for_each_bc_file.replace("analyze_sequencing_data/output/", "")
+                        csv_file = os.path.join(folder_path,iter_i ,csv_file_name)
+                        try:
+                            avg_count = round(self.calculate_average_coverage(csv_file=csv_file))
+                        except:
+                            print(csv_file)
+                        avg_count_per_iter.append([avg_count])
+                    x_axis_avg = round(sum([item[0] for item in avg_count_per_iter]) / len(avg_count_per_iter))
+                    x_axis.extend([x_axis_avg] * self.amount_of_bc)
+
+                    # Group data points by sampling percentage
+                    for bc in range(self.amount_of_bc):
+                        data_avg_temp = []
+                        for iter_i, iterations in all_counts[sampling_percentage].items():
+
+                            if x_axis_avg not in data_avg:
+                                data_avg[x_axis_avg] = []
+                            data_avg_temp.extend(all_counts[sampling_percentage][iter_i][bc])
+                        data_avg[x_axis_avg].append(data_avg_temp)
+
+        if x_axis_type == 'bc_avg_coverage':
+            data = data_avg
+        # Calculate mean and standard deviation for each group
+        means = []
+        std_devs = []
+        sorted_keys = sorted(data.keys())
+        for key in sorted_keys:
+            mean = np.mean(data[key])
+            std_dev = np.std(data[key])
+            means.append(mean)
+            std_devs.append(std_dev)
+
+        # Create a saturation analysis plot
+        if graph_type == 'errorbar':
+            plt.errorbar(sorted_keys, means, yerr=std_devs, capsize=5, fmt='o-', markersize=8)
+            plt.grid(True)
+        elif graph_type == 'boxplot':
+            # plt.boxplot(sorted_keys, labels=sorted_keys)
+            flattened_data = [[item for sublist in lst for item in sublist] for lst in
+                              [data[key] for key in sorted_keys]]
+            plt.boxplot(flattened_data)
+            sorted_keys_xticks_str_arr = [str(round(element,2)) for element in sorted_keys]
+            positions = range(1, len(sorted_keys) + 1)
+            plt.xticks(positions, sorted_keys_xticks_str_arr, rotation=45)
+
+
+        # plt.ylim(-0.5, 4.5)
+        plt.ylabel('Number Of Observed $s_i$')
+        # plt.title('Saturation Analysis of Design X and Experiment Results X')
+        plt.subplots_adjust(bottom=0.2)
+        if x_axis_type == 'sampling_rate':
+            plt.xlabel('Sampling Percentage')
+            plt.savefig(self.output_line_graphs_folder + 'sampling_rate_' + graph_type+'.svg')
+        elif x_axis_type == 'bc_avg_coverage':
+            plt.xlabel('Average Reads Per Strand')
+            plt.savefig(self.output_line_graphs_folder + 'bc_avg_coverage_' + graph_type+'.svg')
+        plt.show()
+        plt.close()
+
+    def save_output_into_separate_folder(self, sampling_percentage: float, iteration: int):
+        output_folder = f"analyze_sequencing_data/{self.output_all_sampling_rate_folder}output_{sampling_percentage}/iter_{iteration}"
+        os.makedirs(output_folder, exist_ok=True)
+        self.move_output_to_sampling_percentage_directory(new_output_dir=output_folder)
+        return output_folder
+
+    def for_each_bc_count_reads_read(self, csv_output_file: Union[Path, str], input_csv_path: Path) -> None:
+        self.for_each_bc_count_reads_read_to_csv(output_file=csv_output_file, input_csv_path=input_csv_path)
         self.hist_foreach_bc_read_count(csv_output_file)
         self.hist_foreach_read_count_count_bc(csv_output_file=csv_output_file)
         self.hist_foreach_error_count_of_bc()
+
+    def create_new_input_csv_according_to_sampling_rate(self, sampling_rate: float,
+                                                        input_csv_path: str,
+                                                        iteration: int) -> str:
+        # Set the chunk size and sampling fraction
+        chunk_size = 100000  # 100,000 rows per chunk
+        sampling_fraction = float(sampling_rate / 100)
+
+        # Create a directory to store the sampled CSV files
+        output_sampling_rate_dir = 'analyze_sequencing_data/'+self.output_all_sampling_rate_folder + f'output_{sampling_rate}/iter_{iteration}/'
+        os.makedirs(output_sampling_rate_dir, exist_ok=True)
+
+        # Iterate over the CSV file in chunks
+        sampled_filepaths = []
+        for i, chunk in enumerate(pd.read_csv(input_csv_path, chunksize=chunk_size)):
+            # Randomly sample rows from the chunk with the specified fraction
+            sampled_chunk = chunk.sample(frac=sampling_fraction)
+            # Write the sampled chunk to a new CSV file
+            chunk_filename = f'sampled_chunk_{i}_iter_{iteration}.csv'
+            chunk_filepath = os.path.join(output_sampling_rate_dir, chunk_filename)
+            sampled_chunk.to_csv(chunk_filepath, index=False)
+            sampled_filepaths.append(chunk_filepath)
+
+        # Concatenate the sampled files into a single output file
+        output_filepath = os.path.join(output_sampling_rate_dir,
+                                       f'sampled_{sampling_rate}_iter_{iteration}.csv')
+        write_header = True
+        with open(output_filepath, 'w+') as output_file:
+            for filepath in sampled_filepaths:
+                with open(filepath, 'r') as input_file:
+                    if write_header:
+                        output_file.write(input_file.readline())  # Write the header
+                        write_header = False
+                    else:
+                        input_file.readline()  # Skip the header
+
+                    # Copy the rest of the file content
+                    shutil.copyfileobj(input_file, output_file)
+                os.remove(filepath)
+
+        # Change the permissions of the output file to 0o777
+        os.chmod(output_filepath, 0o777)
+
+        return output_filepath
 
     def create_folders(self) -> None:
         utilities.is_dir_exists(self.output_hist_folder)
@@ -846,6 +1150,16 @@ class AnalyzeFastqData:
         utilities.is_dir_exists(self.output_line_graphs_folder)
         utilities.is_dir_exists(self.output_csv_coupon_collector_folder)
         utilities.is_dir_exists(self.output_hist_coupon_collector_folder)
+
+    def delete_csv_files_from_folder(self):
+        for item in os.listdir(self.output_csv_folder):
+            if item.endswith(".csv"):
+                file_path = os.path.join(self.output_csv_folder, item)
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted {file_path}")
+                except OSError as e:
+                    print(f"Error deleting {file_path}: {e}")
 
     def run(self):
         self.create_folders()
@@ -868,20 +1182,47 @@ class AnalyzeFastqData:
                                   payload_design=payload_design_pd,
                                   barcodes_design=barcodes_design_pd)
 
-        # Find most common for each bc and for every cycle in that bc in results of good reads
-        self.find_most_common()
+        input_csv_path = self.results_good_reads_file
+        for sampling_percentage in self.sampling_rate_array:
+            # if sampling_percentage == 100:
+            #     input_csv_path_sampling_percentage_100 = 'analyze_sequencing_data/output_all_sampling_rate/output_100/iter_0/csv/results_good_reads.csv'
+            #     continue
+            for iteration in range(10):
+                if sampling_percentage != 100:
+                    input_csv_path = self.create_new_input_csv_according_to_sampling_rate(
+                        sampling_rate=sampling_percentage,
+                        input_csv_path=input_csv_path_sampling_percentage_100,
+                        iteration=iteration)
+                # Find most common for each bc and for every cycle in that bc in results of good reads
+                self.find_most_common(input_csv_path=input_csv_path,
+                                      foreach_bc_payload_count_file_dict_to_csv=self.foreach_bc_payload_count_file,
+                                      most_common_dict_to_csv_path=self.results_most_common_file,
+                                      compare_design_to_experiment_results_output_file=self.compare_design_to_experiment_results_output_file,
+                                      design_simulation_file=self.design_simulation_file,
+                                      heatmap_foreach_bc_and_x_count_with_most_common_file=self.heatmap_foreach_bc_and_x_count_with_most_common_file)
 
-        # For each bc count amount of reads sequenced
-        self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file)
+                # For each bc count amount of reads sequenced
+                self.for_each_bc_count_reads_read(csv_output_file=self.count_reads_for_each_bc_file, input_csv_path=input_csv_path)
 
-        # Create graph with sampling rate
-        self.create_sampling_rate_from_good_reads_graph()
+                # Create graph with sampling rate
+                self.create_sampling_rate_from_good_reads_graph(input_csv_path=input_csv_path)
 
-        # Compare Payloads_of_two_bc
-        self.compare_payloads_of_two_bc(bc1=1, bc2=2)
+                # Compare Payloads_of_two_bc
+                self.compare_payloads_of_two_bc(bc1=1, bc2=2)
 
-        # Create a summary of the results for BC1 and BC2 that will show the fraction of each k-mer in each cycle to each BC
-        self.create_results_table_for_two_bc(bc1=1, bc2=2)
+                # Create a summary of the results for BC1 and BC2 that will show the fraction of each k-mer in each cycle to each BC
+                self.create_results_table_for_two_bc(bc1=1, bc2=2)
 
-        # We want to find
-        self.the_coupon_collector_problem_with_t()
+                # We want to find
+                self.the_coupon_collector_problem_with_t()
+
+                # Move the data into the designated folder for each sampling rate
+                output_folder = self.save_output_into_separate_folder(sampling_percentage=sampling_percentage,
+                                                                      iteration=iteration)
+                if sampling_percentage == 100:
+                    input_csv_path_sampling_percentage_100 = output_folder + '/csv/results_good_reads.csv'
+
+            # Delete all csvs from the output folder
+            self.delete_csv_files_from_folder()
+
+        self.graph_of_all_sampling_most_common_x_to_each_bc()

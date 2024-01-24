@@ -52,6 +52,9 @@ if __name__ == '__main__':
                                           hamming_dist=config['hamming_dist'],
                                           hamming_dist_for_count=config['hamming_dist_for_count'],
                                           hamming_dist_to_include_list=config['hamming_dist_to_include_list'],
-                                          results_table_for_two_bc_file=config['results_table_for_two_bc_file']
+                                          results_table_for_two_bc_file=config['results_table_for_two_bc_file'],
+                                          output_all_sampling_rate_folder=config['output_all_sampling_rate_folder'],
+                                          design_results_only_z_file=config['design_results_only_z_file'],
+                                          sampling_rate_array=config['sampling_rate_array'],
                                           )
     analyze_fastq_data.run()

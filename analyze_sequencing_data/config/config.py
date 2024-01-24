@@ -83,6 +83,12 @@ def build_config():
         'hist_foreach_error_count_of_bc_file': "analyze_sequencing_data/output/graphs/hist/hist_foreach_error_count_of_bc",
         'design_simulation_file': 'analyze_sequencing_data/data/sequence_design_file.dna',
 
+        # output all sampling rate
+        'output_all_sampling_rate_folder': "analyze_sequencing_data/output_all_sampling_rate/",
+        'design_results_only_z_file': 'analyze_sequencing_data/output/csv/design/design_results_only_z.csv',
+        'sampling_rate_array': [100, 50, 30, 20, 10, 5, 1, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001],
+        # 'sampling_rate_array': [0.1, 0.05, 0.01, 0.005, 0.001],
+
         # Params for the coupon collector problem
         't_list': [1, 2, 3, 4],
         # 'n_list': [500, 1000, 1500],
