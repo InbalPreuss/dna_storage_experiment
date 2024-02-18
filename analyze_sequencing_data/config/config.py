@@ -38,7 +38,8 @@ def build_config():
 
     config = {
         'payload_pos': [60, 100, 140, 180],
-        'amount_of_bc': 167,
+        # 'amount_of_bc': 167,
+        'amount_of_bc': 2,
         'design_len': 220,
         'payload_len': 20,
         'universal_len': 20,
